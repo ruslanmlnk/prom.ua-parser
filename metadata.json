@@ -1,0 +1,5 @@
+{
+  "name": "Prom.ua Parser",
+  "description": "An intelligent product search tool that parses live data directly from Prom.ua HTML structure. Filter by price, category, and availability.",
+  "requestFramePermissions": []
+}
