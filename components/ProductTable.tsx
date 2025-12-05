@@ -11,16 +11,16 @@ interface ProductTableProps {
 }
 
 const getEnvVar = (key: string) => {
+  const viteKey = `VITE_${key}`;
   try {
     const meta = import.meta as any;
-    if (typeof meta !== 'undefined' && meta.env && meta.env[`VITE_${key}`]) {
-      return meta.env[`VITE_${key}`];
-    }
+    if (meta?.env && viteKey in meta.env) return meta.env[viteKey];
   } catch (e) {}
 
   try {
-    if (typeof process !== 'undefined' && process.env && process.env[key]) {
-      return process.env[key];
+    if (typeof process !== 'undefined' && process.env) {
+      if (viteKey in process.env) return process.env[viteKey];
+      if (key in process.env) return process.env[key];
     }
   } catch (e) {}
 
