@@ -10,23 +10,6 @@ interface ProductTableProps {
   onProductUpdate: (product: Product) => void;
 }
 
-const getEnvVar = (key: string) => {
-  const viteKey = `VITE_${key}`;
-  try {
-    const meta = import.meta as any;
-    if (meta?.env && viteKey in meta.env) return meta.env[viteKey];
-  } catch (e) {}
-
-  try {
-    if (typeof process !== 'undefined' && process.env) {
-      if (viteKey in process.env) return process.env[viteKey];
-      if (key in process.env) return process.env[key];
-    }
-  } catch (e) {}
-
-  return undefined;
-};
-
 const toBool = (val: unknown) => {
   if (typeof val === 'boolean') return val;
   if (typeof val === 'string') {
@@ -36,7 +19,13 @@ const toBool = (val: unknown) => {
   return false;
 };
 
-const IS_DEMO = toBool(getEnvVar('DEMO_MODE'));
+// Use direct property access so Vite replaces at build time.
+const rawDemoFlag =
+  import.meta.env.VITE_DEMO_MODE ??
+  import.meta.env.DEMO_MODE ??
+  (typeof process !== 'undefined' ? process.env?.VITE_DEMO_MODE ?? process.env?.DEMO_MODE : undefined);
+
+const IS_DEMO = toBool(rawDemoFlag);
 const DEMO_LIMIT = 2;
 const DEMO_STORAGE_KEY = 'prom_parser_demo_used';
 
