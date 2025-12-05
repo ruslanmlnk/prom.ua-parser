@@ -27,7 +27,16 @@ const getEnvVar = (key: string) => {
   return undefined;
 };
 
-const IS_DEMO = getEnvVar('DEMO_MODE') === 'true';
+const toBool = (val: unknown) => {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') {
+    const normalized = val.trim().toLowerCase();
+    return ['true', '1', 'yes', 'on'].includes(normalized);
+  }
+  return false;
+};
+
+const IS_DEMO = toBool(getEnvVar('DEMO_MODE'));
 const DEMO_LIMIT = 2;
 const DEMO_STORAGE_KEY = 'prom_parser_demo_used';
 
