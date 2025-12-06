@@ -3,10 +3,13 @@ import { SearchFilters, Product } from './types';
 import Filters from './components/Filters';
 import ProductTable from './components/ProductTable';
 import { searchPromUa } from './services/promService';
+import { ShoppingBag, Database } from 'lucide-react';
 
 const App: React.FC = () => {
   const [filters, setFilters] = useState<SearchFilters>({
+    mode: 'category',
     shopUrl: '',
+    productUrls: ['']
   });
   
   const [products, setProducts] = useState<Product[]>([]);
@@ -25,7 +28,7 @@ const App: React.FC = () => {
       setProducts(result.products);
       
       if (result.products.length === 0) {
-        setError("За вашим посиланням нічого не знайдено. Перевірте правильність URL.");
+        setError("Нічого не знайдено. Перевірте посилання.");
       }
     } catch (err: any) {
       setError(err.message || 'Виникла помилка при отриманні даних.');
@@ -40,6 +43,23 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-12">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-orange-600 p-2 rounded-lg">
+              <ShoppingBag className="w-5 h-5 text-white" />
+            </div>
+            <h1 className="text-xl font-bold text-slate-800">
+              Prom.ua <span className="font-normal text-slate-500">Live Parser</span>
+            </h1>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-medium px-3 py-1 bg-slate-100 text-slate-600 rounded-full border border-slate-200 hidden sm:flex">
+            <Database className="w-3 h-3" />
+            Direct HTML Scraping
+          </div>
+        </div>
+      </header>
+
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           

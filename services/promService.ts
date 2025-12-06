@@ -29,6 +29,63 @@ const fetchHtmlWithRetry = async (url: string): Promise<string> => {
     throw lastError || new Error("All proxies failed");
 }
 
+const extractFromApollo = (doc: Document, url: string): Partial<Product> | null => {
+    try {
+        const scripts = doc.querySelectorAll('script');
+        for (const script of scripts) {
+            const content = script.textContent || "";
+            if (content.includes('window.ApolloCacheState')) {
+                const match = content.match(/window\.ApolloCacheState\s*=\s*({.+});/);
+                if (match && match[1]) {
+                    const cache = JSON.parse(match[1]);
+                    const productKey = Object.keys(cache).find(k => k.startsWith('ProductCardPageQuery'));
+                    
+                    if (productKey && cache[productKey]?.result?.product) {
+                        const pData = cache[productKey].result.product;
+                        
+                        let allImages: string[] = [];
+                        if (pData.images && Array.isArray(pData.images)) {
+                            allImages = pData.images.map((img: any) => img.url || img);
+                        } else if (pData.image) {
+                            allImages = [pData.image];
+                        }
+
+                        let categoryPath: string[] = [];
+                        let categoryName = "";
+                        if (cache[productKey].result.breadCrumbs?.items) {
+                             categoryPath = cache[productKey].result.breadCrumbs.items.map((b: any) => b.caption);
+                             if(categoryPath.length > 0) categoryName = categoryPath[categoryPath.length - 1];
+                        }
+
+                        const oldPrice = pData.priceOriginal > pData.discountedPrice ? parseFloat(pData.priceOriginal) : undefined;
+                        
+                        return {
+                            id: pData.id ? String(pData.id) : undefined,
+                            title: pData.name,
+                            price: parseFloat(pData.price) || pData.discountedPrice,
+                            oldPrice,
+                            currency: "UAH",
+                            availability: pData.status === 'available' ? 'В наявності' : (pData.status === 'on_order' ? 'Під замовлення' : 'Немає'),
+                            link: url,
+                            seller: "Prom Seller", 
+                            sku: pData.sku,
+                            image: allImages[0],
+                            allImages,
+                            description: pData.descriptionFull || pData.description,
+                            categoryName,
+                            categoryPath,
+                            detailsLoaded: true
+                        };
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Apollo extraction failed", e);
+    }
+    return null;
+}
+
 export const fetchProductDetails = async (url: string): Promise<{ 
     description: string; 
     attributes: ProductAttribute[]; 
@@ -44,60 +101,15 @@ export const fetchProductDetails = async (url: string): Promise<{
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
 
-    let description = "";
+    const apolloData = extractFromApollo(doc, targetUrl);
+    
+    let description = apolloData?.description || "";
     let attributes: ProductAttribute[] = [];
-    let allImages: string[] = [];
-    let categoryName = "";
-    let categoryPath: string[] = [];
-    let oldPrice: number | undefined;
-    let sku = "";
-
-    try {
-        const scripts = doc.querySelectorAll('script');
-        
-        for (const script of scripts) {
-            const content = script.textContent || "";
-            if (content.includes('window.ApolloCacheState')) {
-                const match = content.match(/window\.ApolloCacheState\s*=\s*({.+});/);
-                if (match && match[1]) {
-                    try {
-                        const cache = JSON.parse(match[1]);
-                        const productKey = Object.keys(cache).find(k => k.startsWith('ProductCardPageQuery'));
-                        
-                        if (productKey && cache[productKey]?.result?.product) {
-                            const pData = cache[productKey].result.product;
-
-                            description = pData.descriptionFull || pData.description || "";
-                            
-                            if (pData.images && Array.isArray(pData.images)) {
-                                allImages = pData.images;
-                            } else if (pData.image) {
-                                allImages = [pData.image];
-                            }
-
-                            if (pData.priceOriginal && pData.priceOriginal > pData.discountedPrice) {
-                                oldPrice = parseFloat(pData.priceOriginal);
-                            }
-
-                            sku = pData.sku || "";
-
-                            if (pData.category) {
-                                if (cache[productKey].result.breadCrumbs?.items) {
-                                     categoryPath = cache[productKey].result.breadCrumbs.items.map((b: any) => b.caption);
-                                     if(categoryPath.length > 0) categoryName = categoryPath[categoryPath.length - 1];
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        console.warn("JSON parsing error", e);
-                    }
-                }
-                break;
-            }
-        }
-    } catch (e) {
-        console.warn("Apollo strategy failed", e);
-    }
+    let allImages: string[] = apolloData?.allImages || [];
+    let categoryName = apolloData?.categoryName || "";
+    let categoryPath: string[] = apolloData?.categoryPath || [];
+    let oldPrice: number | undefined = apolloData?.oldPrice;
+    let sku = apolloData?.sku || "";
 
     if (!description) {
         const descSelectors = [
@@ -187,9 +199,88 @@ export const fetchProductDetails = async (url: string): Promise<{
   }
 };
 
+const scrapeSingleProduct = async (url: string): Promise<Product | null> => {
+    try {
+        const targetUrl = url.startsWith('http') ? url : `https://prom.ua${url}`;
+        const html = await fetchHtmlWithRetry(targetUrl);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, "text/html");
+
+        const apolloData = extractFromApollo(doc, targetUrl);
+
+        const details = await fetchProductDetails(targetUrl); 
+        
+        const titleEl = doc.querySelector('h1[data-qaid="product_name"], h1');
+        const title = apolloData?.title || titleEl?.textContent?.trim() || "No Title";
+
+        const priceEl = doc.querySelector('[data-qaid="product_price"]');
+        const price = apolloData?.price || parsePrice(priceEl?.getAttribute('data-qaprice') || priceEl?.textContent);
+
+        const id = apolloData?.id || url.replace(/[^0-9]/g, '').slice(-10) || Date.now().toString();
+
+        const statusEl = doc.querySelector('[data-qaid="product_presence"]');
+        const rawStatus = statusEl?.textContent?.trim() || "";
+        let availability: any = "Unknown";
+        if (apolloData?.availability) {
+            availability = apolloData.availability;
+        } else if (rawStatus.toLowerCase().includes("наявності") || rawStatus.toLowerCase().includes("готово")) {
+            availability = "В наявності";
+        } else if (rawStatus.toLowerCase().includes("замовлення")) {
+            availability = "Під замовлення";
+        } else if (rawStatus.toLowerCase().includes("немає")) {
+            availability = "Немає";
+        }
+
+        const sellerEl = doc.querySelector('[data-qaid="company_name"]');
+        const seller = sellerEl?.textContent?.trim() || "Seller";
+
+        return {
+            id,
+            externalId: id,
+            title,
+            price,
+            oldPrice: details.oldPrice,
+            currency: "UAH",
+            availability,
+            link: targetUrl,
+            seller,
+            sku: details.sku,
+            image: details.allImages[0] || "",
+            allImages: details.allImages,
+            description: details.description,
+            attributes: details.attributes,
+            categoryName: details.categoryName,
+            categoryPath: details.categoryPath,
+            detailsLoaded: true 
+        };
+
+    } catch (e) {
+        console.error("Single product scrape error", url, e);
+        return null;
+    }
+};
+
 export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult> => {
+  if (filters.mode === 'products') {
+    if (!filters.productUrls || filters.productUrls.filter(u => u.trim()).length === 0) {
+        throw new Error("Не вказано жодного посилання на товар.");
+    }
+    
+    const validUrls = filters.productUrls.filter(u => u.trim());
+    const products: Product[] = [];
+    
+    // Process sequentially or in small batches to avoid blocking
+    for (const url of validUrls) {
+        const product = await scrapeSingleProduct(url.trim());
+        if (product) products.push(product);
+    }
+    
+    return { products };
+  }
+
+  // Existing Category Mode Logic
   if (!filters.shopUrl) {
-      throw new Error("Не вказано посилання для парсингу");
+      throw new Error("Не вказано посилання на категорію");
   }
 
   const targetUrl = filters.shopUrl.trim();
@@ -225,6 +316,8 @@ export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult>
              } catch {
                 link = `https://prom.ua${link}`;
              }
+          } else if (!link.startsWith('http')) {
+             link = `https://prom.ua${link}`;
           }
 
           const price = parsePrice(priceEl?.getAttribute('data-qaprice') || priceEl?.textContent);

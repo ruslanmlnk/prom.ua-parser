@@ -25,7 +25,9 @@ export interface Product {
 }
 
 export interface SearchFilters {
-  shopUrl: string;
+  mode: 'category' | 'products';
+  shopUrl: string;       // For category parsing
+  productUrls: string[]; // For specific product parsing
 }
 
 export interface ParseResult {
