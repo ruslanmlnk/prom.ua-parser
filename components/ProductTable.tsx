@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ExternalLink, ShoppingCart, AlertCircle, CheckCircle2, Clock, XCircle, ImageOff, FileJson, FileSpreadsheet, CheckSquare, Square, Loader2, Lock, AlertTriangle } from 'lucide-react';
 import { Product } from '../types';
-import { fetchProductDetails } from '../services/promService';
+import { fetchProductDetails } from '../services/geminiService';
 
 interface ProductTableProps {
   products: Product[];
@@ -78,7 +78,8 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
     const finalItems = [...items];
 
     if (itemsToFetch.length > 0) {
-      const batchSize = 3;
+      // Increased batch size to 5 for faster parallel processing
+      const batchSize = 5;
       for (let i = 0; i < itemsToFetch.length; i += batchSize) {
         const batch = itemsToFetch.slice(i, i + batchSize);
         await Promise.all(batch.map(async (product) => {
@@ -100,6 +101,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
             categoryPath: details.categoryPath,
             oldPrice: details.oldPrice || product.oldPrice,
             sku: details.sku || product.sku,
+            availability: details.availability || product.availability,
             detailsLoaded: true 
           };
           
@@ -181,7 +183,8 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
         
         const safeDesc = `"${(p.description || '').replace(/"/g, '""')}"`;
         
-        const attrsStr = p.attributes?.map(a => `${a.name}|${a.value}`).join('||') || '';
+        // Format attributes as Name:Value|Name:Value
+        const attrsStr = p.attributes?.map(a => `${a.name}:${a.value}`).join('|') || '';
         const safeAttrs = `"${attrsStr.replace(/"/g, '""')}"`;
         
         const imagesStr = (p.allImages && p.allImages.length > 0 ? p.allImages : [p.image]).join(', ');
@@ -310,6 +313,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
 
       xml += `      <description><![CDATA[${descContent}]]></description>
 `;
+      // Attributes loop - ensure specific formatting
       if (p.attributes) {
         p.attributes.forEach(attr => {
            xml += `      <param name="${attr.name.replace(/"/g, '&quot;')}">${attr.value.replace(/&/g, '&amp;')}</param>\n`;
@@ -407,7 +411,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col sm:flex-row justify-between items-center gap-4 sticky top-24 z-10">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col sm:flex-row justify-between items-center gap-4 sticky top-6 z-10">
         <div className="flex items-center gap-3">
            <h3 className="font-semibold text-slate-800">Результати: {products.length}</h3>
            {selectedIds.size > 0 && (

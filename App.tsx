@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { SearchFilters, Product } from './types';
 import Filters from './components/Filters';
 import ProductTable from './components/ProductTable';
-import { searchPromUa } from './services/promService';
-import { ShoppingBag, Database } from 'lucide-react';
+import { searchPromUa } from './services/geminiService';
 
 const App: React.FC = () => {
   const [filters, setFilters] = useState<SearchFilters>({
@@ -43,8 +42,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-12">
-
-
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           
