@@ -2,7 +2,10 @@ import { SearchFilters, ParseResult, Product, ProductAttribute } from "../types"
 
 const parsePrice = (priceStr: string | null | undefined): number => {
   if (!priceStr) return 0;
-  return parseFloat(priceStr.replace(/[^0-9.,]/g, '').replace(',', '.')) || 0;
+  // Normalize spaces (replace &nbsp; and regular spaces), remove non-numeric except dots/commas
+  // Example: "1 200,00 грн" -> "1200.00"
+  const cleanStr = priceStr.replace(/\s+/g, '').replace(/&nbsp;/g, '').replace(/[^0-9.,]/g, '').replace(',', '.');
+  return parseFloat(cleanStr) || 0;
 };
 
 const fetchHtmlWithRetry = async (url: string): Promise<string> => {
@@ -66,7 +69,13 @@ const extractFromApollo = (doc: Document, url: string): Partial<Product> | null 
                              if(categoryPath.length > 0) categoryName = categoryPath[categoryPath.length - 1];
                         }
 
-                        const oldPrice = pData.priceOriginal > pData.discountedPrice ? parseFloat(pData.priceOriginal) : undefined;
+                        const price = parseFloat(pData.price) || pData.discountedPrice;
+                        let oldPrice = pData.priceOriginal ? parseFloat(pData.priceOriginal) : undefined;
+                        
+                        // Sanity check for old price
+                        if (oldPrice && oldPrice <= price) {
+                            oldPrice = undefined;
+                        }
                         
                         // Extract attributes from Apollo if available
                         let attributes: ProductAttribute[] = [];
@@ -80,7 +89,7 @@ const extractFromApollo = (doc: Document, url: string): Partial<Product> | null 
                         return {
                             id: pData.id ? String(pData.id) : undefined,
                             title: pData.name,
-                            price: parseFloat(pData.price) || pData.discountedPrice,
+                            price,
                             oldPrice,
                             currency: "UAH",
                             availability: pData.status === 'available' ? 'В наявності' : (pData.status === 'on_order' ? 'Під замовлення' : 'Немає'),
@@ -178,12 +187,24 @@ const extractDetailsFromDoc = (doc: Document, apolloData: any): {
         }
     });
 
-    // 3. Custom/Legacy Gallery (.cs-images / .cs-image-holder) - Broadened Support
+    // 3. Custom/Legacy Gallery (.cs-images / .cs-image-holder / .b-extra-photos / .b-pictures / .b-images__item)
     const customSelectors = [
         '.cs-image-holder__image',      // Direct class on img
         '.cs-image-holder img',         // Img inside holder
         '.cs-images__item img',         // Img inside item
-        '.cs-images img'                // Fallback
+        '.cs-images img',               // Fallback
+        
+        // Support for b-extra-photos structure
+        '.b-extra-photos img',
+        '.b-extra-photos__item img',
+        '.b-extra-photos__link img',
+
+        // Support for b-pictures / b-images structure (requested)
+        '.b-pictures img',
+        '.b-pictures__link img',
+        '.b-pictures__item img',
+        '.b-images__item img',
+        '.b-images__link img'
     ];
     
     const customGalleryImgs = doc.querySelectorAll(customSelectors.join(', '));
@@ -240,9 +261,22 @@ const extractDetailsFromDoc = (doc: Document, apolloData: any): {
 
     // --- SKU Parsing ---
     if (!sku) {
-        const skuEl = doc.querySelector('[data-qaid="product-sku"]');
+        // 1. data-qaid selector
+        const skuEl = doc.querySelector('[data-qaid="product-sku"], [data-qaid="product_code"], .b-product-data__item_type_sku');
         if (skuEl) {
-            sku = skuEl.textContent?.replace('Код:', '').trim() || "";
+            sku = skuEl.textContent?.replace('Код:', '').replace('Артикул:', '').trim() || "";
+        }
+        
+        // 2. Search by text content logic (fallback)
+        if (!sku) {
+             const allSpans = doc.querySelectorAll('span, div, p, li');
+             for (const el of allSpans) {
+                 const text = el.textContent?.trim() || "";
+                 if (text.startsWith("Код:") || text.startsWith("Артикул:")) {
+                     sku = text.split(':')[1]?.trim() || "";
+                     if (sku) break;
+                 }
+             }
         }
     }
 
@@ -258,11 +292,43 @@ const extractDetailsFromDoc = (doc: Document, apolloData: any): {
         }
     }
 
-    // --- Old Price Parsing ---
+    // --- Old Price Parsing (Updated) ---
+    // Logic: Try Apollo -> Attribute -> Text Content with aggressive selectors
     if (!oldPrice) {
-        const oldPriceEl = doc.querySelector('[data-qaid="old_price"]');
-        if (oldPriceEl) {
-            oldPrice = parsePrice(oldPriceEl.getAttribute('data-qaprice'));
+        const oldPriceSelectors = [
+            '[data-qaid="old_price"]',
+            '[data-qaid="price_old"]',
+            '.b-product-cost__prev', // Classic Prom
+            '.b-product-cost__old',
+            '.old-price',
+            '[class*="old-price"]',
+            '[class*="old_price"]',
+            '[class*="price_old"]',
+            '[class*="prev_price"]',
+            'strike', 
+            'del'
+        ];
+        
+        for (const sel of oldPriceSelectors) {
+            const els = doc.querySelectorAll(sel);
+            for (const el of els) {
+                // Try to get explicit data attribute first
+                const attrVal = el.getAttribute('data-qaprice') || el.getAttribute('data-qaprice-old');
+                if (attrVal) {
+                    const p = parsePrice(attrVal);
+                    if (p > 0) {
+                        oldPrice = p;
+                        break;
+                    }
+                }
+                // Try text content
+                const textVal = parsePrice(el.textContent);
+                if (textVal > 0) {
+                    oldPrice = textVal;
+                    break;
+                }
+            }
+            if (oldPrice) break;
         }
     }
 
@@ -430,12 +496,20 @@ export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult>
         const titleEl = node.querySelector('[data-qaid="product_name"]');
         const linkEl = node.querySelector('[data-qaid="product_link"]');
         const priceEl = node.querySelector('[data-qaid="product_price"]');
-        const oldPriceEl = node.querySelector('[data-qaid="price_old"]'); 
+        
+        // Extended old price selectors for category view
+        let oldPriceEl = node.querySelector('[data-qaid="price_old"]') 
+                         || node.querySelector('.b-product-cost__prev')
+                         || node.querySelector('[class*="old-price"]')
+                         || node.querySelector('strike');
         
         const statusEl = node.querySelector('[data-qaid="product_presence"]');
         const imgEl = node.querySelector('img');
         const shopEl = node.querySelector('[data-qaid="company_name"]') || node.querySelector('[data-qaid="product_shop_url"]');
         const dataProductId = node.getAttribute('data-product-id');
+
+        const skuEl = node.querySelector('[data-qaid="product_code"], .b-product-gallery__sku');
+        const sku = skuEl?.textContent?.replace('Код:', '').trim();
 
         if (titleEl && linkEl) {
           const title = titleEl.getAttribute('title') || titleEl.textContent?.trim() || "No Title";
@@ -453,7 +527,11 @@ export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult>
           }
 
           const price = parsePrice(priceEl?.getAttribute('data-qaprice') || priceEl?.textContent);
-          let oldPrice = oldPriceEl ? parsePrice(oldPriceEl.getAttribute('data-qaprice-old') || oldPriceEl.textContent) : undefined;
+          
+          let oldPrice = undefined;
+          if (oldPriceEl) {
+               oldPrice = parsePrice(oldPriceEl.getAttribute('data-qaprice-old') || oldPriceEl.textContent);
+          }
           
           if (oldPrice && oldPrice <= price) oldPrice = undefined;
 
@@ -493,6 +571,7 @@ export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult>
             availability,
             link,
             seller,
+            sku,
             image,
             allImages: [image], 
             description: "", 

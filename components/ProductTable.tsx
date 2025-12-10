@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ExternalLink, ShoppingCart, AlertCircle, CheckCircle2, Clock, XCircle, ImageOff, FileJson, FileSpreadsheet, CheckSquare, Square, Loader2, Lock, AlertTriangle } from 'lucide-react';
+import { ExternalLink, ShoppingCart, AlertCircle, CheckCircle2, Clock, XCircle, ImageOff, FileJson, FileSpreadsheet, CheckSquare, Square, Loader2, Lock, AlertTriangle, Eye, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Product } from '../types';
-import { fetchProductDetails } from '../services/geminiService';
+import { fetchProductDetails } from '../services/promService';
 
 interface ProductTableProps {
   products: Product[];
@@ -35,6 +35,11 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exportingState, setExportingState] = useState<{ type: 'csv' | 'xml', progress: string } | null>(null);
   const [demoLimitReached, setDemoLimitReached] = useState(false);
+  
+  // Modal State
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  const [loadingDetailsId, setLoadingDetailsId] = useState<string | null>(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -78,7 +83,6 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
     const finalItems = [...items];
 
     if (itemsToFetch.length > 0) {
-      // Increased batch size to 5 for faster parallel processing
       const batchSize = 5;
       for (let i = 0; i < itemsToFetch.length; i += batchSize) {
         const batch = itemsToFetch.slice(i, i + batchSize);
@@ -115,6 +119,42 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
       }
     }
     return finalItems;
+  };
+
+  const handleViewProduct = async (product: Product) => {
+      if (product.detailsLoaded) {
+          setViewingProduct(product);
+          setCurrentImageIndex(0);
+          return;
+      }
+
+      setLoadingDetailsId(product.id);
+      try {
+          const details = await fetchProductDetails(product.link);
+          const combinedImages = Array.from(new Set([product.image || '', ...(details.allImages || [])])).filter(Boolean);
+          
+          const updatedProduct: Product = { 
+            ...product, 
+            description: details.description,
+            attributes: details.attributes,
+            allImages: combinedImages,
+            categoryName: details.categoryName,
+            categoryPath: details.categoryPath,
+            oldPrice: details.oldPrice || product.oldPrice,
+            sku: details.sku || product.sku,
+            availability: details.availability || product.availability,
+            detailsLoaded: true 
+          };
+
+          onProductUpdate(updatedProduct);
+          setViewingProduct(updatedProduct);
+          setCurrentImageIndex(0);
+      } catch (e) {
+          console.error("Failed to load details for view", e);
+          alert("Не вдалося завантажити деталі товару");
+      } finally {
+          setLoadingDetailsId(null);
+      }
   };
 
   const handleDemoRestriction = (items: Product[]) => {
@@ -183,7 +223,6 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
         
         const safeDesc = `"${(p.description || '').replace(/"/g, '""')}"`;
         
-        // Format attributes as Name:Value|Name:Value
         const attrsStr = p.attributes?.map(a => `${a.name}:${a.value}`).join('|') || '';
         const safeAttrs = `"${attrsStr.replace(/"/g, '""')}"`;
         
@@ -313,7 +352,6 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
 
       xml += `      <description><![CDATA[${descContent}]]></description>
 `;
-      // Attributes loop - ensure specific formatting
       if (p.attributes) {
         p.attributes.forEach(attr => {
            xml += `      <param name="${attr.name.replace(/"/g, '&quot;')}">${attr.value.replace(/&/g, '&amp;')}</param>\n`;
@@ -397,6 +435,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
   const isAllSelected = products.length > 0 && selectedIds.size === products.length;
 
   return (
+    <>
     <div className="space-y-6">
       {IS_DEMO && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-3 text-amber-800 text-sm">
@@ -459,6 +498,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
                     {isAllSelected ? <CheckSquare className="w-5 h-5 text-orange-600" /> : <Square className="w-5 h-5" />}
                   </button>
                 </th>
+                <th className="px-2 py-3 w-[40px]"></th>
                 <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[100px]">Фото</th>
                 <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-1/3">Назва товару</th>
                 <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Ціна</th>
@@ -478,6 +518,15 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
                     <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
                        <button onClick={() => toggleSelect(product.id)} className="text-slate-400 hover:text-slate-600">
                          {isSelected ? <CheckSquare className="w-5 h-5 text-orange-600" /> : <Square className="w-5 h-5" />}
+                       </button>
+                    </td>
+                     <td className="px-2 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+                       <button 
+                            onClick={() => handleViewProduct(product)}
+                            className="text-slate-400 hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 transition-colors"
+                            title="Переглянути деталі"
+                       >
+                         {loadingDetailsId === product.id ? <Loader2 className="w-5 h-5 animate-spin" /> : <Eye className="w-5 h-5" />}
                        </button>
                     </td>
                     <td className="px-6 py-4">
@@ -560,6 +609,139 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
         </div>
       </div>
     </div>
+    
+    {/* Product Details Modal */}
+    {viewingProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setViewingProduct(null)}></div>
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                
+                {/* Header */}
+                <div className="flex items-start justify-between p-6 border-b border-slate-100 bg-white z-10">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900 pr-8 line-clamp-2">{viewingProduct.title}</h2>
+                        <div className="flex items-center gap-3 mt-2 text-sm text-slate-500">
+                            {viewingProduct.sku && <span className="bg-slate-100 px-2 py-0.5 rounded font-mono text-slate-600">Код: {viewingProduct.sku}</span>}
+                            <span>ID: {viewingProduct.id}</span>
+                            <span>{viewingProduct.seller}</span>
+                        </div>
+                    </div>
+                    <button 
+                        onClick={() => setViewingProduct(null)}
+                        className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500 hover:text-slate-800"
+                    >
+                        <X className="w-6 h-6" />
+                    </button>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        
+                        {/* Left Column: Images */}
+                        <div className="space-y-4">
+                            <div className="aspect-square bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-center overflow-hidden relative group">
+                                {viewingProduct.allImages && viewingProduct.allImages.length > 0 ? (
+                                    <>
+                                    <img 
+                                        src={viewingProduct.allImages[currentImageIndex]} 
+                                        alt={viewingProduct.title} 
+                                        className="w-full h-full object-contain"
+                                    />
+                                    {viewingProduct.allImages.length > 1 && (
+                                        <>
+                                            <button 
+                                                onClick={() => setCurrentImageIndex(prev => prev === 0 ? (viewingProduct.allImages!.length - 1) : prev - 1)}
+                                                className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-white/80 hover:bg-white text-slate-700 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                                            >
+                                                <ChevronLeft className="w-5 h-5"/>
+                                            </button>
+                                            <button 
+                                                onClick={() => setCurrentImageIndex(prev => prev === (viewingProduct.allImages!.length - 1) ? 0 : prev + 1)}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-white/80 hover:bg-white text-slate-700 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                                            >
+                                                <ChevronRight className="w-5 h-5"/>
+                                            </button>
+                                        </>
+                                    )}
+                                    </>
+                                ) : (
+                                    <ImageOff className="w-12 h-12 text-slate-300" />
+                                )}
+                            </div>
+                            
+                            {viewingProduct.allImages && viewingProduct.allImages.length > 1 && (
+                                <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                                    {viewingProduct.allImages.map((img, idx) => (
+                                        <button 
+                                            key={idx}
+                                            onClick={() => setCurrentImageIndex(idx)}
+                                            className={`w-20 h-20 shrink-0 rounded-lg border overflow-hidden ${currentImageIndex === idx ? 'border-orange-500 ring-2 ring-orange-200' : 'border-slate-200 hover:border-orange-300'}`}
+                                        >
+                                            <img src={img} alt={`Preview ${idx}`} className="w-full h-full object-cover" />
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Right Column: Info */}
+                        <div className="space-y-6">
+                            
+                            {/* Price & Status */}
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                <div className="flex items-baseline gap-3 mb-2">
+                                    <span className={`text-3xl font-bold ${viewingProduct.oldPrice ? 'text-red-600' : 'text-slate-900'}`}>
+                                        {viewingProduct.price.toLocaleString('uk-UA')} <span className="text-lg text-slate-500 font-normal">грн</span>
+                                    </span>
+                                    {viewingProduct.oldPrice && viewingProduct.oldPrice > viewingProduct.price && (
+                                        <span className="text-lg text-slate-400 line-through decoration-slate-400">
+                                            {viewingProduct.oldPrice.toLocaleString('uk-UA')} грн
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    {getAvailabilityBadge(viewingProduct.availability)}
+                                    <a href={viewingProduct.link} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm flex items-center gap-1">
+                                        На сайті <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                </div>
+                            </div>
+
+                            {/* Attributes */}
+                            {viewingProduct.attributes && viewingProduct.attributes.length > 0 && (
+                                <div>
+                                    <h3 className="font-semibold text-slate-800 mb-3">Характеристики</h3>
+                                    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                                        <table className="w-full text-sm">
+                                            <tbody className="divide-y divide-slate-100">
+                                                {viewingProduct.attributes.map((attr, idx) => (
+                                                    <tr key={idx} className={idx % 2 === 0 ? 'bg-slate-50/50' : ''}>
+                                                        <td className="px-4 py-2 text-slate-500 w-1/2">{attr.name}</td>
+                                                        <td className="px-4 py-2 text-slate-900 font-medium">{attr.value}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Description */}
+                            <div>
+                                <h3 className="font-semibold text-slate-800 mb-3">Опис</h3>
+                                <div className="prose prose-sm prose-slate max-w-none bg-white p-4 border border-slate-200 rounded-lg text-slate-600">
+                                    <div dangerouslySetInnerHTML={{ __html: viewingProduct.description || 'Немає опису' }} />
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )}
+    </>
   );
 };
 
