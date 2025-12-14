@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ExternalLink, ShoppingCart, AlertCircle, CheckCircle2, Clock, XCircle, ImageOff, FileJson, FileSpreadsheet, CheckSquare, Square, Loader2, Lock, AlertTriangle, Eye, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Product } from '../types';
-import { fetchProductDetails } from '../services/promService';
+import { fetchProductDetails, scrapeSingleProduct } from '../services/promService';
 
 interface ProductTableProps {
   products: Product[];
@@ -92,22 +92,24 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
              progress: `Завантаження даних ${count + 1}/${itemsToFetch.length}` 
           });
           
-          const details = await fetchProductDetails(product.link);
+          // Use scrapeSingleProduct to perform a full, deep parse of the product page.
+          // This ensures data is identical to "Product List" parsing mode.
+          const fullData = await scrapeSingleProduct(product.link);
           
-          const combinedImages = Array.from(new Set([product.image || '', ...(details.allImages || [])])).filter(Boolean);
+          let updatedProduct: Product;
 
-          const updatedProduct: Product = { 
-            ...product, 
-            description: details.description,
-            attributes: details.attributes,
-            allImages: combinedImages,
-            categoryName: details.categoryName,
-            categoryPath: details.categoryPath,
-            oldPrice: details.oldPrice || product.oldPrice,
-            sku: details.sku || product.sku,
-            availability: details.availability || product.availability,
-            detailsLoaded: true 
-          };
+          if (fullData) {
+             // We use the full data found on the page, BUT we preserve the ID from the 
+             // category list to ensure that the React state/selection logic doesn't break.
+             updatedProduct = {
+                 ...fullData,
+                 id: product.id, 
+                 detailsLoaded: true
+             };
+          } else {
+             // Fallback if scrape fails (e.g. timeout), mark as loaded so we don't retry forever
+             updatedProduct = { ...product, detailsLoaded: true };
+          }
           
           onProductUpdate(updatedProduct);
           

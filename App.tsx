@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { SearchFilters, Product } from './types';
 import Filters from './components/Filters';
 import ProductTable from './components/ProductTable';
-import { searchPromUa } from './services/promService';
+import { searchPromUa } from './services/geminiService';
 
 const App: React.FC = () => {
   const [filters, setFilters] = useState<SearchFilters>({

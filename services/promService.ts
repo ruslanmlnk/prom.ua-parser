@@ -300,6 +300,8 @@ const extractDetailsFromDoc = (doc: Document, apolloData: any): {
             '[data-qaid="price_old"]',
             '.b-product-cost__prev', // Classic Prom
             '.b-product-cost__old',
+            '.b-goods-price__value_type_old', // npshop style
+            '.b-goods-price__old', 
             '.old-price',
             '[class*="old-price"]',
             '[class*="old_price"]',
@@ -344,7 +346,7 @@ const extractDetailsFromDoc = (doc: Document, apolloData: any): {
         }
 
         if (!availability) {
-            const statusEl = doc.querySelector('[data-qaid="product_presence"], [data-qaid="presence_data"]');
+            const statusEl = doc.querySelector('[data-qaid="product_presence"], [data-qaid="presence_data"], .b-goods-data__state, .b-product-status__state');
             if (statusEl) {
                 const rawStatus = statusEl.textContent?.trim() || "";
                 if (rawStatus.toLowerCase().includes("наявності") || rawStatus.toLowerCase().includes("готово")) {
@@ -384,7 +386,7 @@ export const fetchProductDetails = async (url: string): Promise<{
   }
 };
 
-const scrapeSingleProduct = async (url: string): Promise<Product | null> => {
+export const scrapeSingleProduct = async (url: string): Promise<Product | null> => {
     try {
         const targetUrl = url.startsWith('http') ? url : `https://prom.ua${url}`;
         const html = await fetchHtmlWithRetry(targetUrl);
@@ -399,7 +401,14 @@ const scrapeSingleProduct = async (url: string): Promise<Product | null> => {
         const titleEl = doc.querySelector('h1[data-qaid="product_name"], h1');
         const title = apolloData?.title || titleEl?.textContent?.trim() || "No Title";
 
-        const priceEl = doc.querySelector('[data-qaid="product_price"]');
+        // Main Price with fallback selectors for external domains
+        // EXCLUDE old price class when searching for main price to avoid picking up the old price as current
+        let priceEl = doc.querySelector('[data-qaid="product_price"]');
+        if (!priceEl) priceEl = doc.querySelector('.b-goods-price__value:not(.b-goods-price__value_type_old)');
+        if (!priceEl) priceEl = doc.querySelector('.b-product-cost__value');
+        // Fallback to any value if strict one fails
+        if (!priceEl) priceEl = doc.querySelector('.b-goods-price__value');
+        
         const price = apolloData?.price || parsePrice(priceEl?.getAttribute('data-qaprice') || priceEl?.textContent);
 
         const id = apolloData?.id || url.replace(/[^0-9]/g, '').slice(-10) || Date.now().toString();
@@ -411,7 +420,7 @@ const scrapeSingleProduct = async (url: string): Promise<Product | null> => {
             availability = details.availability;
         } else {
              // Fallback to standard status element if not caught by details
-             const statusEl = doc.querySelector('[data-qaid="product_presence"]');
+             const statusEl = doc.querySelector('[data-qaid="product_presence"], .b-goods-data__state');
              const rawStatus = statusEl?.textContent?.trim() || "";
              if (rawStatus.toLowerCase().includes("наявності") || rawStatus.toLowerCase().includes("готово")) {
                  availability = "В наявності";
@@ -488,42 +497,106 @@ export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult>
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
 
-    const productNodes = doc.querySelectorAll('[data-qaid="product_block"]');
+    // Unified selector strategy for various Prom templates
+    const cardSelectors = [
+        '[data-qaid="product_block"]',
+        '.cs-product-gallery__item',
+        '.b-product-gallery__item',
+        '.cs-product-list__item', 
+        '.b-product-list__item',
+        '.js-product-ad',
+        '.b-product-line__item',
+        '.b-goods-gallery__item',
+        '.b-goods-list__item'
+    ];
+
+    // Use Set to dedup nodes found by multiple selectors
+    const uniqueNodes = new Set<Element>();
+    cardSelectors.forEach(sel => {
+        doc.querySelectorAll(sel).forEach(el => uniqueNodes.add(el));
+    });
+
     const products: Product[] = [];
 
-    productNodes.forEach((node) => {
+    uniqueNodes.forEach((node) => {
       try {
-        const titleEl = node.querySelector('[data-qaid="product_name"]');
-        const linkEl = node.querySelector('[data-qaid="product_link"]');
-        const priceEl = node.querySelector('[data-qaid="product_price"]');
-        
-        // Extended old price selectors for category view
+        // --- TITLE ---
+        let titleEl = node.querySelector('[data-qaid="product_name"]');
+        if (!titleEl) titleEl = node.querySelector('.cs-product-gallery__title');
+        if (!titleEl) titleEl = node.querySelector('.b-product-gallery__title');
+        if (!titleEl) titleEl = node.querySelector('.b-goods-title');
+        if (!titleEl) titleEl = node.querySelector('a[title]'); 
+
+        // --- LINK ---
+        let linkEl = node.querySelector('[data-qaid="product_link"]');
+        if (!linkEl && node.matches('a.cs-product-gallery__title')) linkEl = node;
+        if (!linkEl && node.matches('a.b-product-gallery__title')) linkEl = node;
+        if (!linkEl) linkEl = node.querySelector('a.cs-product-gallery__title');
+        if (!linkEl) linkEl = node.querySelector('a.b-product-gallery__title');
+        if (!linkEl) linkEl = node.querySelector('a.b-goods-title');
+        if (!linkEl) linkEl = node.querySelector('a'); // Fallback
+
+        // --- PRICE ---
+        let priceEl = node.querySelector('[data-qaid="product_price"]');
+        if (!priceEl) priceEl = node.querySelector('.cs-goods-price__value');
+        if (!priceEl) priceEl = node.querySelector('.b-product-gallery__current-price');
+        if (!priceEl) priceEl = node.querySelector('.cs-goods-price__major');
+        // Fix for npshop: exclude old price class from main price selector to avoid picking up the wrong value
+        if (!priceEl) priceEl = node.querySelector('.b-goods-price__value:not(.b-goods-price__value_type_old)');
+        if (!priceEl) priceEl = node.querySelector('.b-product-cost__value');
+        // Fallback
+        if (!priceEl) priceEl = node.querySelector('.b-goods-price__value');
+
+        // --- OLD PRICE ---
         let oldPriceEl = node.querySelector('[data-qaid="price_old"]') 
                          || node.querySelector('.b-product-cost__prev')
+                         || node.querySelector('.cs-goods-price__old')
+                         || node.querySelector('.b-product-gallery__old-price')
+                         || node.querySelector('.b-goods-price__value_type_old')
+                         || node.querySelector('.b-goods-price__old')
                          || node.querySelector('[class*="old-price"]')
-                         || node.querySelector('strike');
+                         || node.querySelector('[class*="old_price"]')
+                         || node.querySelector('strike')
+                         || node.querySelector('del');
         
-        const statusEl = node.querySelector('[data-qaid="product_presence"]');
-        const imgEl = node.querySelector('img');
-        const shopEl = node.querySelector('[data-qaid="company_name"]') || node.querySelector('[data-qaid="product_shop_url"]');
-        const dataProductId = node.getAttribute('data-product-id');
+        // --- STATUS ---
+        let statusEl = node.querySelector('[data-qaid="product_presence"]');
+        if (!statusEl) statusEl = node.querySelector('.cs-goods-availability');
+        if (!statusEl) statusEl = node.querySelector('.b-product-gallery__availability');
+        if (!statusEl) statusEl = node.querySelector('.b-goods-data__state');
+        if (!statusEl) statusEl = node.querySelector('.b-product-status__state');
 
+        // --- IMAGE ---
+        const imgEl = node.querySelector('img');
+        
+        // --- SHOP/SELLER ---
+        const shopEl = node.querySelector('[data-qaid="company_name"]') 
+                       || node.querySelector('[data-qaid="product_shop_url"]')
+                       || node.querySelector('.cs-product-gallery__company')
+                       || node.querySelector('.b-product-gallery__company');
+        
+        // --- ID & SKU ---
+        const dataProductId = node.getAttribute('data-product-id');
         const skuEl = node.querySelector('[data-qaid="product_code"], .b-product-gallery__sku');
-        const sku = skuEl?.textContent?.replace('Код:', '').trim();
+        const sku = skuEl?.textContent?.replace('Код:', '').replace('Артикул:', '').trim();
 
         if (titleEl && linkEl) {
           const title = titleEl.getAttribute('title') || titleEl.textContent?.trim() || "No Title";
           
           let link = linkEl.getAttribute('href') || "";
+          // Robust Link Construction for External Domains
           if (link.startsWith('/')) {
              try {
+                // Try to use the origin of the provided category URL
                 const shopUrlObj = new URL(targetUrl);
                 link = `${shopUrlObj.origin}${link}`;
              } catch {
                 link = `https://prom.ua${link}`;
              }
           } else if (!link.startsWith('http')) {
-             link = `https://prom.ua${link}`;
+             // Fallback if somehow just a filename
+             const shopUrlObj = new URL(targetUrl);
+             link = `${shopUrlObj.origin}/${link}`;
           }
 
           const price = parsePrice(priceEl?.getAttribute('data-qaprice') || priceEl?.textContent);
