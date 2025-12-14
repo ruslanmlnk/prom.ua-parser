@@ -301,6 +301,7 @@ const extractDetailsFromDoc = (doc: Document, apolloData: any): {
             '.b-product-cost__prev', // Classic Prom
             '.b-product-cost__old',
             '.b-goods-price__value_type_old', // npshop style
+            '.cs-goods-price__value_type_old', // velotrend style
             '.b-goods-price__old', 
             '.old-price',
             '[class*="old-price"]',
@@ -336,26 +337,18 @@ const extractDetailsFromDoc = (doc: Document, apolloData: any): {
 
     // --- Availability Check ---
     if (!availability) {
-        // Specific selector provided by user for availability
-        const availableEl = doc.querySelector('.b-product-data__item_type_available');
-        if (availableEl) {
-             const text = availableEl.textContent?.trim() || "";
-             if (text.toLowerCase().includes('наявності')) {
-                 availability = 'В наявності';
-             }
-        }
-
-        if (!availability) {
-            const statusEl = doc.querySelector('[data-qaid="product_presence"], [data-qaid="presence_data"], .b-goods-data__state, .b-product-status__state');
-            if (statusEl) {
-                const rawStatus = statusEl.textContent?.trim() || "";
-                if (rawStatus.toLowerCase().includes("наявності") || rawStatus.toLowerCase().includes("готово")) {
-                    availability = "В наявності";
-                } else if (rawStatus.toLowerCase().includes("замовлення")) {
-                    availability = "Під замовлення";
-                } else if (rawStatus.toLowerCase().includes("немає")) {
-                    availability = "Немає";
-                }
+        const statusEl = doc.querySelector('[data-qaid="product_presence"], [data-qaid="presence_data"], .b-goods-data__state, .b-product-status__state, .b-product-data__item_type_available');
+        if (statusEl) {
+            const rawStatus = statusEl.textContent?.trim() || "";
+            const lower = rawStatus.toLowerCase();
+            
+            // Priority: NO > ORDER > YES
+            if (lower.includes("немає") || lower.includes("закінчи")) {
+                availability = "Немає";
+            } else if (lower.includes("замовлення")) {
+                availability = "Під замовлення";
+            } else if (lower.includes("наявності") || lower.includes("готово")) {
+                availability = "В наявності";
             }
         }
     }
@@ -404,6 +397,8 @@ export const scrapeSingleProduct = async (url: string): Promise<Product | null> 
         // Main Price with fallback selectors for external domains
         // EXCLUDE old price class when searching for main price to avoid picking up the old price as current
         let priceEl = doc.querySelector('[data-qaid="product_price"]');
+        if (!priceEl) priceEl = doc.querySelector('.cs-goods-price__value_type_current');
+        if (!priceEl) priceEl = doc.querySelector('.cs-goods-price__value:not(.cs-goods-price__value_type_old)');
         if (!priceEl) priceEl = doc.querySelector('.b-goods-price__value:not(.b-goods-price__value_type_old)');
         if (!priceEl) priceEl = doc.querySelector('.b-product-cost__value');
         // Fallback to any value if strict one fails
@@ -420,14 +415,17 @@ export const scrapeSingleProduct = async (url: string): Promise<Product | null> 
             availability = details.availability;
         } else {
              // Fallback to standard status element if not caught by details
-             const statusEl = doc.querySelector('[data-qaid="product_presence"], .b-goods-data__state');
+             const statusEl = doc.querySelector('[data-qaid="product_presence"], [data-qaid="presence_data"], .b-goods-data__state');
              const rawStatus = statusEl?.textContent?.trim() || "";
-             if (rawStatus.toLowerCase().includes("наявності") || rawStatus.toLowerCase().includes("готово")) {
-                 availability = "В наявності";
-             } else if (rawStatus.toLowerCase().includes("замовлення")) {
-                 availability = "Під замовлення";
-             } else if (rawStatus.toLowerCase().includes("немає")) {
+             const lower = rawStatus.toLowerCase();
+             
+             // Priority: NO > ORDER > YES
+             if (lower.includes("немає") || lower.includes("закінчи")) {
                  availability = "Немає";
+             } else if (lower.includes("замовлення")) {
+                 availability = "Під замовлення";
+             } else if (lower.includes("наявності") || lower.includes("готово")) {
+                 availability = "В наявності";
              }
         }
 
@@ -538,6 +536,8 @@ export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult>
 
         // --- PRICE ---
         let priceEl = node.querySelector('[data-qaid="product_price"]');
+        if (!priceEl) priceEl = node.querySelector('.cs-goods-price__value_type_current');
+        if (!priceEl) priceEl = node.querySelector('.cs-goods-price__value:not(.cs-goods-price__value_type_old)');
         if (!priceEl) priceEl = node.querySelector('.cs-goods-price__value');
         if (!priceEl) priceEl = node.querySelector('.b-product-gallery__current-price');
         if (!priceEl) priceEl = node.querySelector('.cs-goods-price__major');
@@ -553,6 +553,7 @@ export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult>
                          || node.querySelector('.cs-goods-price__old')
                          || node.querySelector('.b-product-gallery__old-price')
                          || node.querySelector('.b-goods-price__value_type_old')
+                         || node.querySelector('.cs-goods-price__value_type_old')
                          || node.querySelector('.b-goods-price__old')
                          || node.querySelector('[class*="old-price"]')
                          || node.querySelector('[class*="old_price"]')
@@ -561,7 +562,9 @@ export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult>
         
         // --- STATUS ---
         let statusEl = node.querySelector('[data-qaid="product_presence"]');
+        if (!statusEl) statusEl = node.querySelector('[data-qaid="presence_data"]');
         if (!statusEl) statusEl = node.querySelector('.cs-goods-availability');
+        if (!statusEl) statusEl = node.querySelector('.cs-goods-data__state');
         if (!statusEl) statusEl = node.querySelector('.b-product-gallery__availability');
         if (!statusEl) statusEl = node.querySelector('.b-goods-data__state');
         if (!statusEl) statusEl = node.querySelector('.b-product-status__state');
@@ -609,13 +612,16 @@ export const searchPromUa = async (filters: SearchFilters): Promise<ParseResult>
           if (oldPrice && oldPrice <= price) oldPrice = undefined;
 
           const rawStatus = statusEl?.textContent?.trim() || "";
+          const lower = rawStatus.toLowerCase();
           let availability: any = "Unknown";
-          if (rawStatus.toLowerCase().includes("наявності") || rawStatus.toLowerCase().includes("готово")) {
-            availability = "В наявності";
-          } else if (rawStatus.toLowerCase().includes("замовлення")) {
-            availability = "Під замовлення";
-          } else if (rawStatus.toLowerCase().includes("немає") || rawStatus.toLowerCase().includes("закінчи")) {
+          
+          // Priority: NO > ORDER > YES
+          if (lower.includes("немає") || lower.includes("закінчи")) {
             availability = "Немає";
+          } else if (lower.includes("замовлення")) {
+            availability = "Під замовлення";
+          } else if (lower.includes("наявності") || lower.includes("готово")) {
+            availability = "В наявності";
           }
 
           const seller = shopEl?.getAttribute('title') || shopEl?.textContent?.trim() || "Prom Seller";
