@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ExternalLink, ShoppingCart, AlertCircle, CheckCircle2, Clock, XCircle, ImageOff, FileJson, FileSpreadsheet, CheckSquare, Square, Loader2, Lock, AlertTriangle, Eye, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Product } from '../types';
 // Fix: Removed missing fetchProductDetails import and used scrapeSingleProduct instead.
-import { scrapeSingleProduct } from '../services/geminiService';
+import { scrapeSingleProduct } from '../services/promService';
 
 interface ProductTableProps {
   products: Product[];
