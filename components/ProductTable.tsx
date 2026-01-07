@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { ExternalLink, ShoppingCart, AlertCircle, CheckCircle2, Clock, XCircle, ImageOff, FileJson, FileSpreadsheet, CheckSquare, Square, Loader2, Lock, AlertTriangle, Eye, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Product } from '../types';
-import { fetchProductDetails, scrapeSingleProduct } from '../services/promService';
+// Fix: Removed missing fetchProductDetails import and used scrapeSingleProduct instead.
+import { scrapeSingleProduct } from '../services/geminiService';
 
 interface ProductTableProps {
   products: Product[];
@@ -123,6 +125,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
     return finalItems;
   };
 
+  // Fix: Updated handleViewProduct to use scrapeSingleProduct instead of missing fetchProductDetails.
   const handleViewProduct = async (product: Product) => {
       if (product.detailsLoaded) {
           setViewingProduct(product);
@@ -132,24 +135,19 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, hasSearched, isLo
 
       setLoadingDetailsId(product.id);
       try {
-          const details = await fetchProductDetails(product.link);
-          const combinedImages = Array.from(new Set([product.image || '', ...(details.allImages || [])])).filter(Boolean);
+          const fullData = await scrapeSingleProduct(product.link);
           
-          const updatedProduct: Product = { 
-            ...product, 
-            description: details.description,
-            attributes: details.attributes,
-            allImages: combinedImages,
-            categoryName: details.categoryName,
-            categoryPath: details.categoryPath,
-            oldPrice: details.oldPrice || product.oldPrice,
-            sku: details.sku || product.sku,
-            availability: details.availability || product.availability,
-            detailsLoaded: true 
-          };
-
-          onProductUpdate(updatedProduct);
-          setViewingProduct(updatedProduct);
+          if (fullData) {
+              const updatedProduct: Product = { 
+                ...fullData,
+                id: product.id, // preserve list ID
+                detailsLoaded: true 
+              };
+              onProductUpdate(updatedProduct);
+              setViewingProduct(updatedProduct);
+          } else {
+              throw new Error("Failed to fetch product data");
+          }
           setCurrentImageIndex(0);
       } catch (e) {
           console.error("Failed to load details for view", e);

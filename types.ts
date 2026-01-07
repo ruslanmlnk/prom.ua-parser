@@ -1,3 +1,4 @@
+
 export interface ProductAttribute {
   name: string;
   value: string;
@@ -28,6 +29,7 @@ export interface SearchFilters {
   mode: 'category' | 'products';
   shopUrl: string;       // For category parsing
   productUrls: string[]; // For specific product parsing
+  maxPages?: number;     // Number of pages to parse in category mode
 }
 
 export interface ParseResult {

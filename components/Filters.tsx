@@ -1,5 +1,6 @@
+// Fix: Added missing React import to resolve namespace errors for React.FC, React.Dispatch, React.SetStateAction, React.ChangeEvent, and React.FormEvent.
 import React from 'react';
-import { Search, Link as LinkIcon, RefreshCw, AlertCircle, Plus, Trash2, List, Grid } from 'lucide-react';
+import { Search, Link as LinkIcon, RefreshCw, AlertCircle, Plus, Trash2, List, Grid, Layers } from 'lucide-react';
 import { SearchFilters } from '../types';
 
 interface FiltersProps {
@@ -16,6 +17,13 @@ const Filters: React.FC<FiltersProps> = ({ filters, setFilters, onSearch, isLoad
 
   const handleShopUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFilters(prev => ({ ...prev, shopUrl: e.target.value }));
+  };
+
+  const handleMaxPagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseInt(e.target.value) || 1;
+    // Limit to reasonable amount to prevent browser hang
+    const clamped = Math.min(Math.max(1, val), 20); 
+    setFilters(prev => ({ ...prev, maxPages: clamped }));
   };
 
   const handleProductUrlChange = (index: number, value: string) => {
@@ -75,21 +83,40 @@ const Filters: React.FC<FiltersProps> = ({ filters, setFilters, onSearch, isLoad
       <form onSubmit={handleSubmit} className="space-y-4">
         
         {filters.mode === 'category' ? (
-          <div>
-            <label className="block text-sm font-semibold text-slate-800 mb-2">
-              Посилання на категорію (Prom.ua)
-            </label>
-            <input
-              type="url"
-              value={filters.shopUrl}
-              onChange={handleShopUrlChange}
-              placeholder="https://prom.ua/ua/c/..."
-              className="w-full pl-3 pr-3 py-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors text-slate-900 placeholder:text-slate-400 text-sm"
-            />
-            <p className="text-xs text-slate-500 mt-2">
-              Вставте посилання на сторінку категорії, щоб зібрати всі товари з неї.
-            </p>
-          </div>
+          <>
+            <div>
+              <label className="block text-sm font-semibold text-slate-800 mb-2">
+                Посилання на категорію (Prom.ua)
+              </label>
+              <input
+                type="url"
+                value={filters.shopUrl}
+                onChange={handleShopUrlChange}
+                placeholder="https://prom.ua/ua/c/..."
+                className="w-full pl-3 pr-3 py-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors text-slate-900 placeholder:text-slate-400 text-sm"
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Вставте посилання на сторінку категорії.
+              </p>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2">
+                <Layers className="w-4 h-4" /> Кількість сторінок
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={filters.maxPages || 1}
+                onChange={handleMaxPagesChange}
+                className="w-full pl-3 pr-3 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors text-slate-900 text-sm"
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Вкажіть скільки сторінок потрібно обробити.
+              </p>
+            </div>
+          </>
         ) : (
           <div>
              <label className="block text-sm font-semibold text-slate-800 mb-2">
@@ -140,7 +167,7 @@ const Filters: React.FC<FiltersProps> = ({ filters, setFilters, onSearch, isLoad
           ) : (
             <>
               <Search className="w-4 h-4" />
-              {filters.mode === 'category' ? 'Парсити категорію' : 'Парсити товари'}
+              {filters.mode === 'category' ? 'Парсити' : 'Парсити товари'}
             </>
           )}
         </button>
@@ -153,15 +180,14 @@ const Filters: React.FC<FiltersProps> = ({ filters, setFilters, onSearch, isLoad
           <ul className="list-disc pl-4 space-y-1 text-xs opacity-90">
             {filters.mode === 'category' ? (
               <>
-                <li>Відкрийте категорію на Prom.ua.</li>
-                <li>Скопіюйте URL з браузера.</li>
-                <li>Парсер збере список товарів.</li>
+                <li>Парсер автоматично шукає кнопку "Наступна сторінка".</li>
+                <li>Переконайтеся, що вказано <strong>Кількість сторінок</strong> більше 1.</li>
+                <li>Деякі сайти можуть потребувати сортування для стабільної роботи.</li>
               </>
             ) : (
               <>
                 <li>Додавайте прямі посилання на товари.</li>
-                <li>Підтримуються Prom.ua та зовнішні сайти на платформі Prom (напр. velotrend.com.ua).</li>
-                <li>Натисніть "+", щоб додати більше.</li>
+                <li>Підтримуються Prom.ua та зовнішні сайти.</li>
               </>
             )}
           </ul>
