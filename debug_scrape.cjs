@@ -2,7 +2,7 @@
 const https = require('https');
 const fs = require('fs');
 
-const url = 'https://velotrend.com.ua/ua/g121577154-detskoe-tvorchestvo?sort=-date_created';
+const url = process.argv[2] || 'https://velotrend.com.ua/ua/g121577154-detskoe-tvorchestvo?sort=-date_created';
 
 https.get(url, (res) => {
     let data = '';

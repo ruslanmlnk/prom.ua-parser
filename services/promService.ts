@@ -1,9 +1,9 @@
 import { SearchFilters, ParseResult, Product, ProductAttribute } from "../types";
 
 const parsePrice = (priceStr: string | null | undefined): number => {
-  if (!priceStr) return 0;
-  const cleanStr = priceStr.replace(/\s+/g, '').replace(/&nbsp;/g, '').replace(/[^0-9.,]/g, '').replace(',', '.');
-  return parseFloat(cleanStr) || 0;
+    if (!priceStr) return 0;
+    const cleanStr = priceStr.replace(/\s+/g, '').replace(/&nbsp;/g, '').replace(/[^0-9.,]/g, '').replace(',', '.');
+    return parseFloat(cleanStr) || 0;
 };
 
 const fetchHtmlWithRetry = async (url: string): Promise<string> => {
@@ -16,7 +16,7 @@ const fetchHtmlWithRetry = async (url: string): Promise<string> => {
         (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
         (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
     ];
-    
+
     const shuffledProxies = [...proxies].sort(() => Math.random() - 0.5);
     let lastError;
 
@@ -24,17 +24,17 @@ const fetchHtmlWithRetry = async (url: string): Promise<string> => {
         try {
             const proxyUrl = proxyGen(finalTargetUrl);
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 20000); 
+            const timeoutId = setTimeout(() => controller.abort(), 20000);
 
             const response = await fetch(proxyUrl, { signal: controller.signal });
             clearTimeout(timeoutId);
 
             if (!response.ok) throw new Error(`Status ${response.status}`);
             const text = await response.text();
-            
+
             if (text.length < 500) throw new Error("Response too short - blocked");
             if (text.includes('captcha') || text.includes('verify you are human')) throw new Error("CAPTCHA detected");
-            
+
             return text;
         } catch (e) {
             console.warn("Proxy attempt failed for", finalTargetUrl, e);
@@ -54,7 +54,7 @@ const extractFromApollo = (doc: Document, url: string): Partial<Product> | null 
                 if (match && match[1]) {
                     const cache = JSON.parse(match[1]);
                     const productKey = Object.keys(cache).find(k => k.startsWith('ProductCardPageQuery'));
-                    
+
                     if (productKey && cache[productKey]?.result?.product) {
                         const pData = cache[productKey].result.product;
                         let allImages: string[] = [];
@@ -67,8 +67,8 @@ const extractFromApollo = (doc: Document, url: string): Partial<Product> | null 
                         let categoryPath: string[] = [];
                         let categoryName = "";
                         if (cache[productKey].result.breadCrumbs?.items) {
-                             categoryPath = cache[productKey].result.breadCrumbs.items.map((b: any) => b.caption);
-                             if(categoryPath.length > 0) categoryName = categoryPath[categoryPath.length - 1];
+                            categoryPath = cache[productKey].result.breadCrumbs.items.map((b: any) => b.caption);
+                            if (categoryPath.length > 0) categoryName = categoryPath[categoryPath.length - 1];
                         }
 
                         const price = parseFloat(pData.price) || pData.discountedPrice;
@@ -91,7 +91,7 @@ const extractFromApollo = (doc: Document, url: string): Partial<Product> | null 
                             currency: "UAH",
                             availability: pData.status === 'available' ? 'В наявності' : (pData.status === 'on_order' ? 'Під замовлення' : 'Немає'),
                             link: url,
-                            seller: "Prom Seller", 
+                            seller: "Prom Seller",
                             sku: pData.sku,
                             image: allImages[0],
                             allImages,
@@ -105,7 +105,7 @@ const extractFromApollo = (doc: Document, url: string): Partial<Product> | null 
                 }
             }
         }
-    } catch (e) {}
+    } catch (e) { }
     return null;
 }
 
@@ -166,7 +166,18 @@ const extractDetailsFromDoc = (doc: Document, apolloData: any): any => {
     }
 
     if (!oldPrice) {
-        const oldPriceSelectors = ['[data-qaid="old_price"]', '.b-product-cost__prev', '.cs-goods-price__value_type_old', '.cs-goods-price__old', 'strike', 'del'];
+        const oldPriceSelectors = [
+            '[data-qaid="old_price"]',
+            '[data-qaid="old_product_price"]',
+            '.b-goods-price__value_type_old',
+            '.b-product-gallery__old-price',
+            '.b-product-cost__old-price',
+            '.b-product-cost__prev',
+            '.cs-goods-price__value_type_old',
+            '.cs-goods-price__old',
+            'strike',
+            'del'
+        ];
         for (const sel of oldPriceSelectors) {
             const el = doc.querySelector(sel);
             const val = parsePrice(el?.getAttribute('data-qaprice') || el?.textContent);
@@ -175,7 +186,7 @@ const extractDetailsFromDoc = (doc: Document, apolloData: any): any => {
     }
 
     if (!availability) {
-        const statusEl = doc.querySelector('[data-qaid="product_presence"], .b-goods-data__state, .b-product-status__state, .cs-goods-availability, .cs-goods-data__state');
+        const statusEl = doc.querySelector('[data-qaid="presence_data"], [data-qaid="product_presence"], .b-product-data__item_type_available, .b-goods-data__state, .b-product-status__state, .cs-goods-availability, .cs-goods-data__state, .b-product-gallery__state');
         if (statusEl) {
             const lower = statusEl.textContent?.toLowerCase() || "";
             if (lower.includes("немає")) availability = "Немає";
@@ -195,10 +206,16 @@ export const scrapeSingleProduct = async (url: string): Promise<Product | null> 
         const doc = parser.parseFromString(html, "text/html");
         const apolloData = extractFromApollo(doc, targetUrl);
         const details = extractDetailsFromDoc(doc, apolloData);
-        
+
         const title = apolloData?.title || doc.querySelector('h1')?.textContent?.trim() || "No Title";
-        const price = apolloData?.price || parsePrice(doc.querySelector('[data-qaid="product_price"], .cs-goods-price__value_type_current')?.textContent);
-        const id = apolloData?.id || targetUrl.split('-').pop()?.replace(/[^0-9]/g, '') || Date.now().toString();
+        const priceEl = doc.querySelector('[data-qaid="product_price"]') ||
+            doc.querySelector('.cs-goods-price__value_type_current') ||
+            doc.querySelector('.b-goods-price__value_type_current') ||
+            doc.querySelector('.b-product-gallery__current-price') ||
+            doc.querySelector('.b-product-cost__price');
+        const price = apolloData?.price || parsePrice(priceEl?.getAttribute('data-qaprice') || priceEl?.textContent);
+        const idMatch = targetUrl.match(/\/p(\d+)/) || targetUrl.match(/-(\d+)\.html/);
+        const id = apolloData?.id || (idMatch ? idMatch[1] : Date.now().toString());
 
         return {
             id,
@@ -217,7 +234,7 @@ export const scrapeSingleProduct = async (url: string): Promise<Product | null> 
             attributes: details.attributes,
             categoryName: details.categoryName,
             categoryPath: details.categoryPath,
-            detailsLoaded: true 
+            detailsLoaded: true
         };
     } catch (e) {
         return null;
@@ -226,54 +243,83 @@ export const scrapeSingleProduct = async (url: string): Promise<Product | null> 
 
 const extractProductsFromCategoryPage = (doc: Document, targetUrl: string): { products: Product[], nextUrlFromDom: string | null } => {
     const cardSelectors = [
-        '[data-qaid="product_block"]', 
-        '.cs-product-gallery__item', 
-        '.b-product-gallery__item', 
-        '.b-goods-gallery__item', 
+        '[data-qaid="product_block"]',
+        '[data-qaid="product-block"]',
+        '.cs-product-gallery__item',
+        '.b-product-gallery__item',
+        '.b-goods-gallery__item',
         '.cs-product-list__item',
-        '.cs-product-gallery'
+        '.cs-product-gallery',
+        '.b-product-gallery',
+        '.b-product-gallery li'
     ];
-    
+
     const uniqueNodes = new Set<Element>();
     cardSelectors.forEach(sel => doc.querySelectorAll(sel).forEach(el => uniqueNodes.add(el)));
 
     const products: Product[] = [];
     uniqueNodes.forEach((node) => {
-      try {
-        const titleEl = node.querySelector('[data-qaid="product_name"], .cs-product-gallery__title, .b-goods-title, a.cs-product-gallery__title');
-        const linkEl = node.querySelector('a[href]');
-        if (titleEl && linkEl) {
-          const title = titleEl.textContent?.trim() || "No Title";
-          const href = linkEl.getAttribute('href') || "";
-          const link = new URL(href, targetUrl).href;
-          const price = parsePrice(node.querySelector('[data-qaid="product_price"], .cs-goods-price__value, .b-goods-price__value, .cs-goods-price__major, .cs-goods-price__value_type_current')?.textContent);
-          const oldPriceEl = node.querySelector('[data-qaid="price_old"], .cs-goods-price__old, strike, del');
-          const oldPrice = oldPriceEl ? parsePrice(oldPriceEl.textContent) : undefined;
-          
-          const statusEl = node.querySelector('[data-qaid="product_presence"], .cs-goods-availability, .b-goods-data__state, .cs-goods-data__state');
-          let availability: any = "Unknown";
-          const lower = statusEl?.textContent?.toLowerCase() || "";
-          if (lower.includes("немає")) availability = "Немає";
-          else if (lower.includes("замовлення")) availability = "Під замовлення";
-          else if (lower.includes("наявності") || lower.includes("готово")) availability = "В наявності";
+        try {
+            const titleEl = node.querySelector('[data-qaid="product_name"], .cs-product-gallery__title, .b-product-gallery__title, .b-goods-title, .cs-goods-title-wrap, a.cs-product-gallery__title');
+            const linkEl = node.querySelector('a[href]');
+            if (titleEl && linkEl) {
+                const title = titleEl.textContent?.trim() || "No Title";
+                const href = linkEl.getAttribute('href') || "";
+                const link = new URL(href, targetUrl).href;
 
-          const imgEl = node.querySelector('img');
-          const image = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || "";
+                // Пріоритет для поточної ціни: спочатку шукаємо .cs-goods-price__value_type_current
+                const priceEl = node.querySelector('.cs-goods-price__value_type_current') ||
+                    node.querySelector('.b-goods-price__value_type_current') ||
+                    node.querySelector('.b-product-gallery__current-price') ||
+                    node.querySelector('[data-qaid="product_price"]') ||
+                    node.querySelector('.b-product-cost__price') ||
+                    node.querySelector('.cs-goods-price__value') ||
+                    node.querySelector('.b-goods-price__value') ||
+                    node.querySelector('.cs-goods-price__major');
+                const price = parsePrice(priceEl?.getAttribute('data-qaprice') || priceEl?.textContent);
 
-          products.push({
-            id: link,
-            title,
-            price,
-            oldPrice: (oldPrice && oldPrice > price) ? oldPrice : undefined,
-            currency: "UAH",
-            availability,
-            link,
-            seller: node.querySelector('[data-qaid="company_name"]')?.textContent?.trim() || "Seller",
-            image,
-            detailsLoaded: false
-          });
-        }
-      } catch (err) {}
+                // Пріоритет для старої ціни: спочатку шукаємо .cs-goods-price__value_type_old
+                const oldPriceEl = node.querySelector('.cs-goods-price__value_type_old') ||
+                    node.querySelector('.b-goods-price__value_type_old') ||
+                    node.querySelector('.b-product-gallery__old-price') ||
+                    node.querySelector('[data-qaid="price_old"]') ||
+                    node.querySelector('[data-qaid="old_price"]') ||
+                    node.querySelector('.cs-goods-price__old') ||
+                    node.querySelector('strike') ||
+                    node.querySelector('del') ||
+                    node.querySelector('[data-qaid="discount_label"]'); // Іноді стара ціна поруч зі знижкою
+                const oldPrice = oldPriceEl ? parsePrice(oldPriceEl.getAttribute('data-qaprice') || oldPriceEl.textContent) : undefined;
+
+                // Пріоритет для наявності: спочатку шукаємо [data-qaid="presence_data"]
+                const statusEl = node.querySelector('[data-qaid="presence_data"]') ||
+                    node.querySelector('.cs-goods-data__state') ||
+                    node.querySelector('.b-product-gallery__state') ||
+                    node.querySelector('.cs-goods-availability') ||
+                    node.querySelector('[data-qaid="product_presence"]') ||
+                    node.querySelector('.b-goods-data__state');
+                let availability: any = "Unknown";
+                const lower = statusEl?.textContent?.toLowerCase() || "";
+                if (lower.includes("немає")) availability = "Немає";
+                else if (lower.includes("замовлення")) availability = "Під замовлення";
+                else if (lower.includes("наявності") || lower.includes("готово")) availability = "В наявності";
+
+                const imgEl = node.querySelector('img');
+                const image = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || "";
+
+                products.push({
+                    id: link,
+                    title,
+                    price,
+                    oldPrice: (oldPrice && oldPrice > price) ? oldPrice : undefined,
+                    currency: "UAH",
+                    availability,
+                    link,
+                    seller: node.querySelector('[data-qaid="company_name"]')?.textContent?.trim() || "Seller",
+                    image,
+                    detailsLoaded: false
+                });
+            }
+        } catch (err) { }
     });
 
     let nextUrlFromDom: string | null = null;
@@ -283,10 +329,15 @@ const extractProductsFromCategoryPage = (doc: Document, targetUrl: string): { pr
         if (!href || ['#', 'javascript:void(0)'].includes(href)) continue;
         const text = a.textContent?.trim() || "";
         const lowerText = text.toLowerCase();
+        const classes = a.className || "";
+
         if (
-            text === '›' || text === '»' || 
+            text === '›' || text === '»' || text === '→' ||
             lowerText.includes('наступна') || lowerText.includes('далі') || lowerText === 'next' ||
-            a.getAttribute('data-qaid') === 'next_page'
+            a.getAttribute('data-qaid') === 'next_page' ||
+            a.getAttribute('rel') === 'next' ||
+            classes.includes('b-pager__link_pos_last') ||
+            classes.includes('cs-pager__link_pos_last')
         ) {
             try {
                 const resolved = new URL(href, targetUrl).href;
@@ -294,7 +345,7 @@ const extractProductsFromCategoryPage = (doc: Document, targetUrl: string): { pr
                     nextUrlFromDom = resolved;
                     break;
                 }
-            } catch {}
+            } catch { }
         }
     }
 
@@ -305,10 +356,10 @@ const extractProductsFromCategoryPage = (doc: Document, targetUrl: string): { pr
 const getNextPageUrl = (currentUrl: string): string => {
     const url = new URL(currentUrl);
     const path = url.pathname;
-    
+
     // Шукаємо паттерн /page_N
     const pageMatch = path.match(/\/page_(\d+)/);
-    
+
     if (pageMatch) {
         const currentPage = parseInt(pageMatch[1]);
         const nextPath = path.replace(`/page_${currentPage}`, `/page_${currentPage + 1}`);
@@ -319,71 +370,71 @@ const getNextPageUrl = (currentUrl: string): string => {
         const base = path.endsWith('/') ? path.slice(0, -1) : path;
         url.pathname = `${base}/page_2`;
     }
-    
+
     return url.toString();
 }
 
 export const searchPromUa = async (filters: SearchFilters, onProgress?: (msg: string) => void): Promise<ParseResult> => {
-  if (filters.mode === 'products') {
-    const validUrls = filters.productUrls.filter(u => u.trim());
-    const products: Product[] = [];
-    for (let i = 0; i < validUrls.length; i++) {
-        if (onProgress) onProgress(`Парсинг товару ${i + 1} з ${validUrls.length}...`);
-        const p = await scrapeSingleProduct(validUrls[i].trim());
-        if (p) products.push(p);
-    }
-    return { products };
-  }
-
-  let currentUrl: string = filters.shopUrl.trim();
-  const maxPages = filters.maxPages || 1;
-  const allProducts: Product[] = [];
-  const visitedUrls = new Set<string>();
-
-  try {
-    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-        // Запобігаємо нескінченним циклам
-        const normUrl = currentUrl.split('?')[0].replace(/\/$/, '');
-        if (visitedUrls.has(normUrl)) break;
-        visitedUrls.add(normUrl);
-
-        if (onProgress) onProgress(`Обробка сторінки ${pageNum} з ${maxPages}...`);
-        console.log(`[Parser] Fetching: ${currentUrl}`);
-
-        const html = await fetchHtmlWithRetry(currentUrl);
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
-
-        const { products, nextUrlFromDom } = extractProductsFromCategoryPage(doc, currentUrl);
-        
-        let added = 0;
-        products.forEach(p => {
-            if (!allProducts.some(existing => existing.id === p.id)) {
-                allProducts.push(p);
-                added++;
-            }
-        });
-
-        console.log(`[Parser] Found ${products.length} products. Added ${added} new.`);
-
-        // Якщо на сторінці немає товарів - ймовірно ми вийшли за межі пагінації
-        if (products.length === 0) break;
-
-        // Визначаємо URL для наступної ітерації
-        if (pageNum < maxPages) {
-            // Пріоритет: 1. Посилання з DOM, 2. Автоматична генерація
-            if (nextUrlFromDom) {
-                currentUrl = nextUrlFromDom;
-            } else {
-                currentUrl = getNextPageUrl(currentUrl);
-            }
-            await new Promise(r => setTimeout(r, 1500));
+    if (filters.mode === 'products') {
+        const validUrls = filters.productUrls.filter(u => u.trim());
+        const products: Product[] = [];
+        for (let i = 0; i < validUrls.length; i++) {
+            if (onProgress) onProgress(`Парсинг товару ${i + 1} з ${validUrls.length}...`);
+            const p = await scrapeSingleProduct(validUrls[i].trim());
+            if (p) products.push(p);
         }
+        return { products };
     }
-    return { products: allProducts };
-  } catch (error) {
-    console.error("[Parser] Scraping failed:", error);
-    if (allProducts.length > 0) return { products: allProducts };
-    throw error;
-  }
+
+    let currentUrl: string = filters.shopUrl.trim();
+    const maxPages = filters.maxPages || 1;
+    const allProducts: Product[] = [];
+    const visitedUrls = new Set<string>();
+
+    try {
+        for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+            // Запобігаємо нескінченним циклам
+            const normUrl = currentUrl.split('?')[0].replace(/\/$/, '');
+            if (visitedUrls.has(normUrl)) break;
+            visitedUrls.add(normUrl);
+
+            if (onProgress) onProgress(`Обробка сторінки ${pageNum} з ${maxPages}...`);
+            console.log(`[Parser] Fetching: ${currentUrl}`);
+
+            const html = await fetchHtmlWithRetry(currentUrl);
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+
+            const { products, nextUrlFromDom } = extractProductsFromCategoryPage(doc, currentUrl);
+
+            let added = 0;
+            products.forEach(p => {
+                if (!allProducts.some(existing => existing.id === p.id)) {
+                    allProducts.push(p);
+                    added++;
+                }
+            });
+
+            console.log(`[Parser] Found ${products.length} products. Added ${added} new.`);
+
+            // Якщо на сторінці немає товарів - ймовірно ми вийшли за межі пагінації
+            if (products.length === 0) break;
+
+            // Визначаємо URL для наступної ітерації
+            if (pageNum < maxPages) {
+                // Пріоритет: 1. Посилання з DOM, 2. Автоматична генерація
+                if (nextUrlFromDom) {
+                    currentUrl = nextUrlFromDom;
+                } else {
+                    currentUrl = getNextPageUrl(currentUrl);
+                }
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
+        return { products: allProducts };
+    } catch (error) {
+        console.error("[Parser] Scraping failed:", error);
+        if (allProducts.length > 0) return { products: allProducts };
+        throw error;
+    }
 };
