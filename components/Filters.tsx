@@ -20,10 +20,9 @@ const Filters: React.FC<FiltersProps> = ({ filters, setFilters, onSearch, isLoad
   };
 
   const handleMaxPagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseInt(e.target.value) || 1;
-    // Limit to reasonable amount to prevent browser hang
-    const clamped = Math.min(Math.max(1, val), 20); 
-    setFilters(prev => ({ ...prev, maxPages: clamped }));
+    const val = parseInt(e.target.value, 10);
+    const normalized = Number.isFinite(val) ? Math.max(1, val) : 1;
+    setFilters(prev => ({ ...prev, maxPages: normalized }));
   };
 
   const handleProductUrlChange = (index: number, value: string) => {
@@ -107,7 +106,6 @@ const Filters: React.FC<FiltersProps> = ({ filters, setFilters, onSearch, isLoad
               <input
                 type="number"
                 min="1"
-                max="20"
                 value={filters.maxPages || 1}
                 onChange={handleMaxPagesChange}
                 className="w-full pl-3 pr-3 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors text-slate-900 text-sm"
