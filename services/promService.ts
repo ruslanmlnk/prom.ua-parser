@@ -6,43 +6,48 @@ const parsePrice = (priceStr: string | null | undefined): number => {
     return parseFloat(cleanStr) || 0;
 };
 
+const AVAILABLE = "В наявності";
+const ON_ORDER = "Під замовлення";
+const NOT_AVAILABLE = "Немає";
+
+const normalizeAvailability = (value: string | null | undefined): Product['availability'] => {
+    const lower = (value || "").toLowerCase();
+    if (lower.includes("немає") || lower.includes("нет в наличии") || lower.includes("outofstock")) return NOT_AVAILABLE as Product['availability'];
+    if (lower.includes("замовлення") || lower.includes("заказ") || lower.includes("preorder")) return ON_ORDER as Product['availability'];
+    if (lower.includes("наявності") || lower.includes("в наличии") || lower.includes("instock") || lower.includes("готово")) return AVAILABLE as Product['availability'];
+    return "Unknown";
+};
+
+const buildFetchUrl = (targetUrl: string): string => {
+    if (typeof window !== "undefined" && window.location?.origin) {
+        return `/api/fetch?url=${encodeURIComponent(targetUrl)}`;
+    }
+    return targetUrl;
+};
+
 const fetchHtmlWithRetry = async (url: string): Promise<string> => {
     const urlObj = new URL(url);
     urlObj.searchParams.set('_v', Date.now().toString());
     const finalTargetUrl = urlObj.toString();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-    const proxies = [
-        (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-        (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-        (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    ];
+    try {
+        const response = await fetch(buildFetchUrl(finalTargetUrl), { signal: controller.signal });
+        if (!response.ok) throw new Error(`Status ${response.status}`);
+        const text = await response.text();
 
-    const shuffledProxies = [...proxies].sort(() => Math.random() - 0.5);
-    let lastError;
-
-    for (const proxyGen of shuffledProxies) {
-        try {
-            const proxyUrl = proxyGen(finalTargetUrl);
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-            const response = await fetch(proxyUrl, { signal: controller.signal });
-            clearTimeout(timeoutId);
-
-            if (!response.ok) throw new Error(`Status ${response.status}`);
-            const text = await response.text();
-
-            if (text.length < 500) throw new Error("Response too short - blocked");
-            if (text.includes('captcha') || text.includes('verify you are human')) throw new Error("CAPTCHA detected");
-
-            return text;
-        } catch (e) {
-            console.warn("Proxy attempt failed for", finalTargetUrl, e);
-            lastError = e;
+        if (text.length < 500) throw new Error("Response too short - blocked");
+        const lower = text.toLowerCase();
+        if (lower.includes("captcha") || lower.includes("verify you are human")) {
+            throw new Error("CAPTCHA detected");
         }
+
+        return text;
+    } finally {
+        clearTimeout(timeoutId);
     }
-    throw lastError || new Error("Всі проксі-сервери не змогли отримати доступ до сторінки.");
-}
+};
 
 const extractFromApollo = (doc: Document, url: string): Partial<Product> | null => {
     try {
@@ -241,6 +246,67 @@ export const scrapeSingleProduct = async (url: string): Promise<Product | null> 
     }
 };
 
+const getJsonLdItems = (doc: Document): any[] => {
+    const items: any[] = [];
+
+    doc.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
+        const raw = script.textContent?.trim();
+        if (!raw) return;
+
+        try {
+            const parsed = JSON.parse(raw);
+            const queue = Array.isArray(parsed) ? [...parsed] : [parsed];
+
+            while (queue.length > 0) {
+                const item = queue.shift();
+                if (!item || typeof item !== 'object') continue;
+                items.push(item);
+
+                if (Array.isArray(item['@graph'])) queue.push(...item['@graph']);
+                if (Array.isArray(item.itemListElement)) {
+                    item.itemListElement.forEach((entry: any) => queue.push(entry.item || entry));
+                }
+            }
+        } catch (error) {
+            console.warn("Failed to parse JSON-LD", error);
+        }
+    });
+
+    return items;
+};
+
+const extractProductsFromJsonLd = (doc: Document, targetUrl: string): Product[] => {
+    return getJsonLdItems(doc)
+        .filter(item => item?.['@type'] === 'Product' || item?.['@type']?.includes?.('Product'))
+        .map((item): Product | null => {
+            const offer = Array.isArray(item.offers) ? item.offers[0] : item.offers;
+            const offerUrl = offer?.url || item.url;
+            if (!item.name || !offerUrl) return null;
+
+            const link = new URL(offerUrl, targetUrl).href;
+            const idMatch = link.match(/\/p(\d+)/) || link.match(/-(\d+)\.html/);
+            const image = Array.isArray(item.image) ? item.image[0] : item.image;
+            const price = parsePrice(String(offer?.price || ""));
+
+            return {
+                id: link,
+                externalId: idMatch ? idMatch[1] : undefined,
+                title: item.name,
+                price,
+                currency: offer?.priceCurrency || "UAH",
+                availability: normalizeAvailability(offer?.availability),
+                link,
+                seller: offer?.seller?.name || "Seller",
+                sku: item.sku,
+                image,
+                allImages: image ? [image] : [],
+                description: item.description || "",
+                detailsLoaded: false
+            };
+        })
+        .filter((product): product is Product => Boolean(product));
+};
+
 const extractProductsFromCategoryPage = (doc: Document, targetUrl: string): { products: Product[], nextUrlFromDom: string | null } => {
     const cardSelectors = [
         '[data-qaid="product_block"]',
@@ -258,6 +324,7 @@ const extractProductsFromCategoryPage = (doc: Document, targetUrl: string): { pr
     cardSelectors.forEach(sel => doc.querySelectorAll(sel).forEach(el => uniqueNodes.add(el)));
 
     const products: Product[] = [];
+    const jsonLdProducts = extractProductsFromJsonLd(doc, targetUrl);
     uniqueNodes.forEach((node) => {
         try {
             const titleEl = node.querySelector('[data-qaid="product_name"], .cs-product-gallery__title, .b-product-gallery__title, .b-goods-title, .cs-goods-title-wrap, a.cs-product-gallery__title');
@@ -303,11 +370,15 @@ const extractProductsFromCategoryPage = (doc: Document, targetUrl: string): { pr
                 else if (lower.includes("замовлення")) availability = "Під замовлення";
                 else if (lower.includes("наявності") || lower.includes("готово")) availability = "В наявності";
 
+                availability = normalizeAvailability(statusEl?.textContent);
+
                 const imgEl = node.querySelector('img');
                 const image = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || "";
+                const idMatch = link.match(/\/p(\d+)/) || link.match(/-(\d+)\.html/);
 
                 products.push({
                     id: link,
+                    externalId: idMatch ? idMatch[1] : undefined,
                     title,
                     price,
                     oldPrice: (oldPrice && oldPrice > price) ? oldPrice : undefined,
@@ -320,6 +391,26 @@ const extractProductsFromCategoryPage = (doc: Document, targetUrl: string): { pr
                 });
             }
         } catch (err) { }
+    });
+
+    jsonLdProducts.forEach(product => {
+        const existingIndex = products.findIndex(existing => existing.link === product.link);
+        if (existingIndex >= 0) {
+            products[existingIndex] = {
+                ...product,
+                ...products[existingIndex],
+                externalId: products[existingIndex].externalId || product.externalId,
+                sku: products[existingIndex].sku || product.sku,
+                image: products[existingIndex].image || product.image,
+                allImages: products[existingIndex].allImages?.length ? products[existingIndex].allImages : product.allImages,
+                description: products[existingIndex].description || product.description,
+                seller: products[existingIndex].seller === "Seller" ? product.seller : products[existingIndex].seller,
+                price: products[existingIndex].price || product.price,
+                availability: products[existingIndex].availability === "Unknown" ? product.availability : products[existingIndex].availability,
+            };
+        } else {
+            products.push(product);
+        }
     });
 
     let nextUrlFromDom: string | null = null;
