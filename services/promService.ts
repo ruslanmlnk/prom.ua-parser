@@ -25,6 +25,20 @@ const buildFetchUrl = (targetUrl: string): string => {
     return targetUrl;
 };
 
+const isCaptchaPage = (html: string): boolean => {
+    const lower = html.toLowerCase();
+
+    return [
+        "verify you are human",
+        "checking your browser",
+        "cf-challenge",
+        "g-recaptcha-response",
+        "h-captcha",
+        "<title>captcha",
+        "captcha detected",
+    ].some(marker => lower.includes(marker));
+};
+
 const fetchHtmlWithRetry = async (url: string): Promise<string> => {
     const urlObj = new URL(url);
     urlObj.searchParams.set('_v', Date.now().toString());
@@ -38,8 +52,7 @@ const fetchHtmlWithRetry = async (url: string): Promise<string> => {
         const text = await response.text();
 
         if (text.length < 500) throw new Error("Response too short - blocked");
-        const lower = text.toLowerCase();
-        if (lower.includes("captcha") || lower.includes("verify you are human")) {
+        if (isCaptchaPage(text)) {
             throw new Error("CAPTCHA detected");
         }
 
